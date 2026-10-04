@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PULSE//MONITOR</title>
+<meta name="description" content="Live ECG-style heart rate monitor for Garmin watches and any Bluetooth heart-rate strap.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+/* ===== TOKENS ===== */
+:root{
+  --bg:#020604;
+  --panel:#050d08;
+  --line:#0f2e1b;
+  --green:#39ff7a;
+  --green-dim:#17562f;
+  --ghost:#0a2214;
+  --text:#b6f5cb;
+  --muted:#4f8a67;
+  --amber:#ffb000;
+  --red:#ff3b3b;
+  --z0:#2f6f50; --z1:#4aa3ff; --z2:#39ff7a; --z3:#d4ff3a; --z4:#ffb000; --z5:#ff3b3b;
+  --gutter:16px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text);font-family:'DM Mono',ui-monospace,monospace;font-size:14px;min-height:100%}
+body{padding:var(--gutter);padding-bottom:calc(var(--gutter) + env(safe-area-inset-bottom));max-width:1100px;margin:0 auto}
+button,input{font:inherit;color:inherit}
+
+/* CRT overlay */
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;
+  background:
+    repeating-linear-gradient(to bottom,rgba(0,0,0,0) 0,rgba(0,0,0,0) 2px,rgba(0,0,0,.18) 3px),
+    radial-gradient(ellipse at center,rgba(0,0,0,0) 55%,rgba(0,0,0,.55) 100%);}
+
+/* ===== HEADER ===== */
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}
+.brand{display:flex;align-items:center;gap:12px}
+h1{font-family:'Syne',sans-serif;font-weight:800;font-size:clamp(22px,4vw,30px);letter-spacing:.02em;color:var(--green);text-shadow:0 0 14px rgba(57,255,122,.5)}
+h1 span{color:var(--muted);font-weight:700}
+.status{display:flex;align-items:center;gap:8px;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.led{width:10px;height:10px;border-radius:50%;background:#1a2a20;box-shadow:inset 0 0 0 1px #000}
+.status[data-s="live"] .led,.status[data-s="demo"] .led{background:var(--green);box-shadow:0 0 10px var(--green)}
+.status[data-s="demo"] .led{background:var(--amber);box-shadow:0 0 10px var(--amber)}
+.status[data-s="connecting"] .led{background:var(--amber);animation:blink .6s infinite}
+.status[data-s="lost"] .led{background:var(--red);animation:blink .6s infinite}
+@keyframes blink{50%{opacity:.2}}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+
+.btn{background:transparent;border:1px solid var(--green-dim);color:var(--green);padding:10px 16px;border-radius:4px;cursor:pointer;
+  letter-spacing:.1em;text-transform:uppercase;font-size:12px;transition:background .15s,box-shadow .15s,transform .05s}
+.btn:hover{background:rgba(57,255,122,.08);box-shadow:0 0 12px rgba(57,255,122,.25)}
+.btn:active{transform:translateY(1px)}
+.btn:focus-visible,input:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.btn.primary{background:var(--green);color:#02130a;border-color:var(--green);font-weight:500}
+.btn.primary:hover{background:#6dffa0}
+.btn.amber{color:var(--amber);border-color:#5a4000}
+.btn:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;background:transparent}
+
+.notice{border:1px solid #5a4000;color:var(--amber);background:rgba(255,176,0,.06);padding:10px 12px;border-radius:4px;margin-bottom:12px;font-size:12.5px;line-height:1.5;display:none}
+.notice.show{display:block}
+.notice.err{border-color:#6a1c1c;color:#ff8a8a;background:rgba(255,59,59,.07)}
+
+/* ===== MONITOR ===== */
+.monitor{display:grid;grid-template-columns:230px 1fr;border:1px solid var(--line);background:var(--panel);border-radius:6px;overflow:hidden}
+.readout{padding:18px 16px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:10px;justify-content:space-between}
+.label{font-size:11px;letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
+.lcd{position:relative;font-size:88px;line-height:1;font-weight:500;letter-spacing:.02em;text-align:right;color:var(--green);text-shadow:0 0 18px rgba(57,255,122,.55);font-variant-numeric:tabular-nums}
+.lcd .ghost{position:absolute;inset:0;color:var(--ghost);text-shadow:none;z-index:0}
+.lcd .val{position:relative;z-index:1}
+.unit{display:flex;align-items:center;justify-content:space-between}
+.heart{width:26px;height:26px;color:var(--green-dim);transition:color .1s}
+.heart svg{width:100%;height:100%;fill:currentColor;display:block}
+.heart.beat{color:var(--green);filter:drop-shadow(0 0 8px var(--green));animation:thump .28s ease-out}
+@keyframes thump{0%{transform:scale(1)}30%{transform:scale(1.35)}100%{transform:scale(1)}}
+.zone-pill{display:inline-block;padding:4px 10px;border:1px solid currentColor;border-radius:99px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--z0)}
+.pct{color:var(--muted);font-size:12px}
+
+.scope{position:relative;min-height:240px;
+  background-image:
+    linear-gradient(rgba(57,255,122,.07) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(57,255,122,.07) 1px,transparent 1px),
+    linear-gradient(rgba(57,255,122,.14) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(57,255,122,.14) 1px,transparent 1px);
+  background-size:20px 20px,20px 20px,100px 100px,100px 100px}
+#trace{position:absolute;inset:0;width:100%;height:100%;display:block}
+.scope .tag{position:absolute;top:10px;left:12px;font-size:11px;letter-spacing:.18em;color:var(--muted)}
+.scope .nosig{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;letter-spacing:.3em;color:var(--green-dim);text-transform:uppercase;pointer-events:none}
+.scope .nosig.hide{display:none}
+
+.alarm{display:none;position:absolute;left:0;right:0;bottom:0;padding:8px 12px;text-align:center;font-weight:500;letter-spacing:.2em;font-size:12px;background:var(--red);color:#1a0000;animation:blink .7s infinite}
+.alarm.show{display:block}
+
+/* ===== LOWER GRID ===== */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.card{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:14px 16px}
+.card.wide{grid-column:1/-1}
+.card h2{font-family:'Syne',sans-serif;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;font-weight:700}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.stat .n{font-size:30px;color:var(--green);text-shadow:0 0 10px rgba(57,255,122,.35);font-variant-numeric:tabular-nums}
+.stat .l{font-size:10.5px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
+
+.zones{display:flex;flex-direction:column;gap:7px}
+.zrow{display:grid;grid-template-columns:44px 1fr 56px;gap:8px;align-items:center;font-size:12px}
+.zrow .bar{height:8px;background:#0a1b11;border-radius:2px;overflow:hidden}
+.zrow .bar i{display:block;height:100%;width:0;transition:width .4s}
+.zrow .t{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+
+canvas#graph{width:100%;height:190px;display:block}
+
+.settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
+.field label{display:block;font-size:10.5px;letter-spacing:.16em;color:var(--muted);text-transform:uppercase;margin-bottom:5px}
+.field input[type=number]{width:100%;background:#030a06;border:1px solid var(--line);border-radius:4px;padding:9px 10px;color:var(--green)}
+.toggle{display:flex;align-items:center;gap:8px;padding-top:22px;cursor:pointer;user-select:none;font-size:12px;letter-spacing:.1em;text-transform:uppercase}
+.toggle input{accent-color:var(--green);width:18px;height:18px}
+.footer-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+footer{margin:18px 0 6px;color:var(--muted);font-size:11.5px;line-height:1.6}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width:760px){
+  .monitor{grid-template-columns:1fr}
+  .readout{border-right:0;border-bottom:1px solid var(--line);flex-direction:row;align-items:center;flex-wrap:wrap}
+  .lcd{font-size:72px}
+  .scope{min-height:200px}
+  .grid{grid-template-columns:1fr}
+  .stats{grid-template-columns:repeat(2,1fr)}
+}
+@media (prefers-reduced-motion:reduce){.heart.beat,.alarm,.status .led{animation:none}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>PULSE<span>//</span>MONITOR</h1>
+    <div class="status" id="status" data-s="idle"><span class="led"></span><span id="statusText">Standby</span></div>
+  </div>
+  <div class="actions">
+    <button class="btn primary" id="btnConnect">Connect watch</button>
+    <button class="btn amber" id="btnDemo">Demo mode</button>
+    <button class="btn" id="btnStop" disabled>Disconnect</button>
+  </div>
+</header>
+
+<div class="notice" id="notice"></div>
+
+<section class="monitor" aria-label="Live heart rate">
+  <div class="readout">
+    <div>
+      <div class="label">Heart rate</div>
+      <div class="lcd" aria-live="off"><span class="ghost">888</span><span class="val" id="bpm">---</span></div>
+    </div>
+    <div>
+      <div class="unit"><span class="label">BPM</span>
+        <span class="heart" id="heart"><svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 2.6 4.5 6.4 4.5c2 0 3.6 1.1 4.6 2.6l1 1.4 1-1.4c1-1.5 2.6-2.6 4.6-2.6 3.8 0 5.5 3.9 4 7.3C19.500 16.400 12 21 12 21z"/></svg></span>
+      </div>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="zone-pill" id="zonePill">No signal</span>
+        <span class="pct" id="pct">--% max</span>
+      </div>
+    </div>
+  </div>
+  <div class="scope">
+    <canvas id="trace"></canvas>
+    <div class="tag">LEAD II &nbsp;·&nbsp; 25 mm/s</div>
+    <div class="nosig" id="nosig">No signal</div>
+    <div class="alarm" id="alarm">ALARM</div>
+  </div>
+</section>
+
+<div class="grid">
+  <section class="card">
+    <h2>Session</h2>
+    <div class="stats">
+      <div class="stat"><div class="n" id="sMin">--</div><div class="l">Min</div></div>
+      <div class="stat"><div class="n" id="sAvg">--</div><div class="l">Avg</div></div>
+      <div class="stat"><div class="n" id="sMax">--</div><div class="l">Max</div></div>
+      <div class="stat"><div class="n" id="sTime">0:00</div><div class="l">Time</div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Time in zone</h2>
+    <div class="zones" id="zones"></div>
+  </section>
+
+  <section class="card wide">
+    <h2>BPM over time</h2>
+    <canvas id="graph"></canvas>
+  </section>
+
+  <section class="card wide">
+    <h2>Settings</h2>
+    <div class="settings">
+      <div class="field"><label for="age">Age</label><input type="number" id="age" min="10" max="99" inputmode="numeric"></div>
+      <div class="field"><label for="maxhr">Max HR</label><input type="number" id="maxhr" min="120" max="230" inputmode="numeric"></div>
+      <div class="field"><label for="low">Alarm below</label><input type="number" id="low" min="30" max="200" inputmode="numeric"></div>
+      <div class="field"><label for="high">Alarm above</label><input type="number" id="high" min="60" max="230" inputmode="numeric"></div>
+      <label class="toggle"><input type="checkbox" id="alarmOn"> Alarm</label>
+      <label class="toggle"><input type="checkbox" id="beepOn"> Beat beep</label>
+    </div>
+    <div class="footer-actions">
+      <button class="btn" id="btnCsv" disabled>Export CSV</button>
+      <button class="btn" id="btnReset">Reset session</button>
+    </div>
+  </section>
+</div>
+
+<footer>
+  On a Garmin: Settings → Sensors &amp; Accessories → Wrist Heart Rate → Broadcast (or start the "Broadcast Heart Rate" activity), then press Connect and pick your watch.
+  Works in Chrome / Edge on desktop and Android (Safari on iPhone has no Web Bluetooth).
+  The trace is a synthesized ECG shape driven by your BPM and beat timing, not a medical reading.
+</footer>
+
+<script>
+/* ============================================================
+   PULSE//MONITOR — single file, no dependencies
+   Sections: helpers · settings · audio · zones · session ·
+             bluetooth · demo · trace · graph · ui · init
+   ============================================================ */
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+
+/* ---------- settings (localStorage, optional) ---------- */
+const DEFAULTS = { age:30, maxhr:190, low:50, high:170, alarmOn:true, beepOn:true };
+let cfg = { ...DEFAULTS };
+try { Object.assign(cfg, JSON.parse(localStorage.getItem('pulse-monitor') || '{}')); } catch(e){}
+const saveCfg = () => { try { localStorage.setItem('pulse-monitor', JSON.stringify(cfg)); } catch(e){} };
+
+/* ---------- audio ---------- */
+let actx = null;
+function audio(){
+  if(!actx){ try{ actx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  if(actx && actx.state === 'suspended') actx.resume();
+  return actx;
+}
+function tone(freq, dur, vol, when=0){
+  const c = audio(); if(!c) return;
+  const o = c.createOscillator(), g = c.createGain();
+  o.type = 'sine'; o.frequency.value = freq;
+  const t = c.currentTime + when;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(c.destination);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+
+/* ---------- zones ---------- */
+const ZONES = [
+  {n:'Rest',   c:'var(--z0)'},
+  {n:'Zone 1', c:'var(--z1)'},
+  {n:'Zone 2', c:'var(--z2)'},
+  {n:'Zone 3', c:'var(--z3)'},
+  {n:'Zone 4', c:'var(--z4)'},
+  {n:'Zone 5', c:'var(--z5)'}
+];
+const zoneOf = bpm => {
+  const p = bpm / cfg.maxhr;
+  return p < .5 ? 0 : p < .6 ? 1 : p < .7 ? 2 : p < .8 ? 3 : p < .9 ? 4 : 5;
+};
+const fmtTime = s => { s = Math.floor(s); const m = Math.floor(s/60), r = s%60;
+  return m >= 60 ? `${Math.floor(m/60)}:${String(m%60).padStart(2,'0')}:${String(r).padStart(2,'0')}` : `${m}:${String(r).padStart(2,'0')}`; };
+
+/* ---------- session state ---------- */
+const S = {
+  mode:'idle',            // idle | connecting | live | demo | lost
+  bpm:0,
+  samples:[],             // {t, wall, bpm}
+  start:0, lastRead:0,
+  min:Infinity, max:0, sum:0, n:0,
+  zoneMs:[0,0,0,0,0,0],
+  lastAlarm:0
+};
+function resetSession(){
+  S.samples = []; S.start = 0; S.lastRead = 0;
+  S.min = Infinity; S.max = 0; S.sum = 0; S.n = 0; S.zoneMs = [0,0,0,0,0,0];
+  renderStats(); drawGraph();
+  $('btnCsv').disabled = true;
+}
+
+function addReading(bpm){
+  if(!(bpm > 0 && bpm < 250)) return;
+  const now = performance.now();
+  if(!S.start) S.start = now;
+  const dt = S.lastRead ? Math.min(now - S.lastRead, 5000) : 0;
+  S.lastRead = now;
+  S.zoneMs[zoneOf(bpm)] += dt;
+  S.bpm = bpm;
+  S.samples.push({ t:(now - S.start)/1000, wall:Date.now(), bpm });
+  S.min = Math.min(S.min, bpm); S.max = Math.max(S.max, bpm);
+  S.sum += bpm; S.n++;
+  $('btnCsv').disabled = false;
+  render(); checkAlarm(bpm);
+}
+
+/* ---------- alarm ---------- */
+function checkAlarm(bpm){
+  const el = $('alarm');
+  if(!cfg.alarmOn){ el.classList.remove('show'); return; }
+  const hi = bpm > cfg.high, lo = bpm < cfg.low;
+  if(hi || lo){
+    el.textContent = hi ? `HIGH HEART RATE · ${bpm} BPM` : `LOW HEART RATE · ${bpm} BPM`;
+    el.classList.add('show');
+    const now = performance.now();
+    if(now - S.lastAlarm > 4000){ S.lastAlarm = now; tone(hi?880:440,.18,.12); tone(hi?1100:330,.18,.12,.22); }
+  } else el.classList.remove('show');
+}
+
+/* ---------- bluetooth ---------- */
+const HR_SERVICE = 'heart_rate', HR_CHAR = 'heart_rate_measurement';
+let btDevice = null, btChar = null, manualStop = false, retries = 0;
+
+function parseHR(dv){
+  const flags = dv.getUint8(0);
+  return (flags & 1) ? dv.getUint16(1, true) : dv.getUint8(1);
+}
+function onHR(e){
+  if(S.mode !== 'live'){ setMode('live'); hideNotice(); }
+  addReading(parseHR(e.target.value));
+}
+async function openGatt(){
+  const server = await btDevice.gatt.connect();
+  const svc = await server.getPrimaryService(HR_SERVICE);
+  btChar = await svc.getCharacteristic(HR_CHAR);
+  await btChar.startNotifications();
+  btChar.addEventListener('characteristicvaluechanged', onHR);
+}
+async function connectWatch(){
+  audio();
+  if(!navigator.bluetooth){
+    showNotice('This browser has no Web Bluetooth. Open this page in Chrome or Edge on desktop or Android. Demo mode works everywhere.', true);
+    return;
+  }
+  stopDemo();
+  manualStop = false; retries = 0;
+  try{
+    setMode('connecting');
+    btDevice = await navigator.bluetooth.requestDevice({ filters:[{ services:[HR_SERVICE] }] });
+    btDevice.addEventListener('gattserverdisconnected', onDisconnected);
+    await openGatt();
+    // mode flips to "live" on first reading
+  }catch(err){
+    setMode('idle');
+    if(err && err.name === 'NotFoundError') return; // user closed chooser
+    showNotice('Could not connect: ' + (err && err.message ? err.message : err) +
+      '. Make sure the watch is broadcasting heart rate and not already connected to another app.', true);
+  }
+}
+async function onDisconnected(){
+  if(manualStop) return;
+  setMode('lost');
+  if(retries < 4){
+    retries++;
+    showNotice(`Signal lost. Reconnecting (attempt ${retries}/4)…`);
+    setTimeout(async () => {
+      if(manualStop) return;
+      try{ await openGatt(); }catch(e){ onDisconnected(); }
+    }, 2000);
+  } else {
+    showNotice('Signal lost. Press Connect watch to try again.', true);
+  }
+}
+function disconnect(){
+  manualStop = true;
+  if(btChar){ try{ btChar.removeEventListener('characteristicvaluechanged', onHR); }catch(e){} }
+  if(btDevice && btDevice.gatt && btDevice.gatt.connected) btDevice.gatt.disconnect();
+  btDevice = btChar = null;
+  stopDemo();
+  setMode('idle'); hideNotice();
+  S.bpm = 0; render(); checkAlarm(0);
+}
+
+/* ---------- demo ---------- */
+let demoTimer = null, demoBpm = 72, demoTarget = 72, demoTick = 0;
+function startDemo(){
+  audio();
+  if(S.mode === 'live' || S.mode === 'connecting'){ disconnect(); }
+  stopDemo();
+  manualStop = false;
+  setMode('demo'); showNotice('Demo mode: simulated heartbeat. Connect a real watch any time.');
+  demoBpm = 72; demoTarget = 72; demoTick = 0;
+  const step = () => {
+    if(demoTick++ % 20 === 0) demoTarget = 62 + Math.random() * 105;
+    demoBpm += (demoTarget - demoBpm) * 0.12 + (Math.random() - .5) * 2.2;
+    addReading(Math.round(demoBpm));
+  };
+  step(); demoTimer = setInterval(step, 1000);
+}
+function stopDemo(){ if(demoTimer){ clearInterval(demoTimer); demoTimer = null; } }
+
+/* ---------- ECG trace (sweep) ---------- */
+const cv = $('trace'), cx = cv.getContext('2d');
+let W = 0, H = 0, ys = new Float32Array(1), drawn = 0, headF = 0, lastTs = 0;
+let lastBeat = 0, nextBeat = 0;
+const SPEED = 110; // px per second
+
+const g = (x, mu, s) => Math.exp(-((x-mu)*(x-mu)) / (2*s*s));
+const pqrst = t => 0.11*g(t,-.16,.025) - 0.10*g(t,-.035,.010) + 1.0*g(t,0,.012) - 0.22*g(t,.03,.012) + 0.26*g(t,.26,.05);
+
+function resize(){
+  const r = cv.getBoundingClientRect(), d = Math.min(window.devicePixelRatio || 1, 2);
+  W = Math.max(1, Math.floor(r.width)); H = Math.max(1, Math.floor(r.height));
+  cv.width = W * d; cv.height = H * d; cx.setTransform(d,0,0,d,0,0);
+  ys = new Float32Array(W).fill(H * .62); drawn = 0; headF = 0;
+}
+function sampleAt(ts){
+  const active = (S.mode === 'live' || S.mode === 'demo') && S.bpm > 0;
+  let v = 0;
+  if(active){
+    const T = 60000 / S.bpm / 1000;
+    const s = Math.min(1, Math.max(.5, T / .9));
+    const t = (ts - lastBeat) / 1000;
+    v = pqrst(t / s) + pqrst((t - T) / s);
+  }
+  v += (Math.random() - .5) * (active ? .018 : .006);
+  return H * .62 - v * H * .5;
+}
+function frame(ts){
+  const dt = lastTs ? Math.min(ts - lastTs, 100) : 16;
+  // beat clock
+  const active = (S.mode === 'live' || S.mode === 'demo') && S.bpm > 0;
+  if(active){
+    if(!nextBeat || nextBeat < ts - 2000) nextBeat = ts;
+    while(ts >= nextBeat){
+      lastBeat = nextBeat; nextBeat += 60000 / S.bpm;
+      onBeat();
+    }
+  } else nextBeat = 0;
+
+  // advance sweep
+  headF += SPEED * dt / 1000;
+  const target = Math.floor(headF), n = target - drawn;
+  for(let i = 1; i <= n; i++){
+    ys[(drawn + i) % W] = sampleAt(lastTs + dt * i / n);
+  }
+  drawn = target;
+  lastTs = ts;
+  paint();
+  requestAnimationFrame(frame);
+}
+function paint(){
+  cx.clearRect(0, 0, W, H);
+  const head = drawn % W, gap = 16, seg = 14;
+  cx.lineWidth = 2; cx.lineJoin = 'round'; cx.lineCap = 'round';
+  cx.strokeStyle = '#39ff7a'; cx.shadowColor = '#39ff7a'; cx.shadowBlur = 9;
+  for(let c0 = 0; c0 < W; c0 += seg){
+    const c1 = Math.min(c0 + seg + 1, W);
+    const age = (head - c0 + W) % W;
+    if(age > W - gap) continue;
+    cx.globalAlpha = Math.max(.12, 1 - (age / W) * .85);
+    cx.beginPath();
+    for(let c = c0; c < c1; c++){
+      const a = (head - c + W) % W;
+      if(a > W - gap) break;
+      c === c0 ? cx.moveTo(c, ys[c]) : cx.lineTo(c, ys[c]);
+    }
+    cx.stroke();
+  }
+  cx.globalAlpha = 1; cx.shadowBlur = 0;
+}
+function onBeat(){
+  const h = $('heart');
+  h.classList.remove('beat'); void h.offsetWidth; h.classList.add('beat');
+  if(cfg.beepOn) tone(1000, .06, .06);
+}
+
+/* ---------- graph ---------- */
+const gc = $('graph'), gx = gc.getContext('2d');
+function drawGraph(){
+  const r = gc.getBoundingClientRect(), d = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, Math.floor(r.width)), h = Math.max(1, Math.floor(r.height));
+  if(gc.width !== w*d || gc.height !== h*d){ gc.width = w*d; gc.height = h*d; }
+  gx.setTransform(d,0,0,d,0,0); gx.clearRect(0,0,w,h);
+  const padL = 34, padB = 18, padT = 6, padR = 6;
+  const pw = w - padL - padR, ph = h - padT - padB;
+  const yMin = 40, yMax = Math.max(cfg.maxhr + 10, S.max + 5);
+  const Y = b => padT + ph - (b - yMin) / (yMax - yMin) * ph;
+  const tMax = Math.max(60, S.samples.length ? S.samples[S.samples.length-1].t : 0);
+  const X = t => padL + t / tMax * pw;
+
+  // zone bands
+  const edges = [.5,.6,.7,.8,.9,1].map(p => p * cfg.maxhr);
+  const cols = ['#4aa3ff','#39ff7a','#d4ff3a','#ffb000','#ff3b3b'];
+  gx.globalAlpha = .08;
+  for(let i = 0; i < 5; i++){
+    const y1 = Y(Math.min(edges[i+1], yMax)), y0 = Y(edges[i]);
+    gx.fillStyle = cols[i]; gx.fillRect(padL, y1, pw, y0 - y1);
+  }
+  gx.globalAlpha = 1;
+  // axes
+  gx.font = '10px DM Mono, monospace'; gx.fillStyle = '#4f8a67'; gx.strokeStyle = '#0f2e1b'; gx.lineWidth = 1;
+  gx.textAlign = 'right'; gx.textBaseline = 'middle';
+  for(let b = 60; b <= yMax; b += 30){
+    gx.beginPath(); gx.moveTo(padL, Y(b)+.5); gx.lineTo(w - padR, Y(b)+.5); gx.stroke();
+    gx.fillText(b, padL - 6, Y(b));
+  }
+  gx.textAlign = 'center'; gx.textBaseline = 'top';
+  const stepT = tMax > 1800 ? 600 : tMax > 600 ? 300 : tMax > 180 ? 60 : 15;
+  for(let t = 0; t <= tMax; t += stepT) gx.fillText(fmtTime(t), Math.min(X(t), w - 14), h - padB + 4);
+  // alarm limits
+  if(cfg.alarmOn){
+    gx.setLineDash([4,4]); gx.strokeStyle = 'rgba(255,59,59,.5)';
+    [cfg.low, cfg.high].forEach(b => { if(b > yMin && b < yMax){ gx.beginPath(); gx.moveTo(padL, Y(b)); gx.lineTo(w - padR, Y(b)); gx.stroke(); }});
+    gx.setLineDash([]);
+  }
+  // line
+  if(S.samples.length > 1){
+    gx.strokeStyle = '#39ff7a'; gx.lineWidth = 1.8; gx.shadowColor = '#39ff7a'; gx.shadowBlur = 6; gx.lineJoin = 'round';
+    gx.beginPath();
+    S.samples.forEach((p,i) => i ? gx.lineTo(X(p.t), Y(p.bpm)) : gx.moveTo(X(p.t), Y(p.bpm)));
+    gx.stroke(); gx.shadowBlur = 0;
+  } else {
+    gx.fillStyle = '#17562f'; gx.textAlign = 'center'; gx.textBaseline = 'middle';
+    gx.fillText('Waiting for data…', padL + pw/2, padT + ph/2);
+  }
+}
+
+/* ---------- ui rendering ---------- */
+const MODE_TEXT = { idle:'Standby', connecting:'Connecting…', live:'Live · BLE', demo:'Demo', lost:'Signal lost' };
+function setMode(m){
+  S.mode = m;
+  $('status').dataset.s = m;
+  $('statusText').textContent = MODE_TEXT[m];
+  $('btnStop').disabled = (m === 'idle');
+  $('btnConnect').disabled = (m === 'connecting');
+  if(m === 'idle' || m === 'lost') { S.bpm = m === 'idle' ? 0 : S.bpm; }
+  render();
+}
+function showNotice(msg, err){
+  const n = $('notice'); n.textContent = msg; n.className = 'notice show' + (err ? ' err' : '');
+}
+function hideNotice(){ $('notice').className = 'notice'; }
+
+function render(){
+  const has = (S.mode === 'live' || S.mode === 'demo') && S.bpm > 0;
+  $('bpm').textContent = has ? S.bpm : '---';
+  $('nosig').classList.toggle('hide', has);
+  const pill = $('zonePill');
+  if(has){
+    const z = zoneOf(S.bpm);
+    pill.textContent = ZONES[z].n; pill.style.color = ZONES[z].c;
+    $('pct').textContent = Math.round(S.bpm / cfg.maxhr * 100) + '% max';
+  } else {
+    pill.textContent = S.mode === 'lost' ? 'Signal lost' : 'No signal'; pill.style.color = 'var(--z0)';
+    $('pct').textContent = '--% max';
+  }
+  renderStats(); drawGraph();
+}
+function renderStats(){
+  $('sMin').textContent = S.n ? S.min : '--';
+  $('sMax').textContent = S.n ? S.max : '--';
+  $('sAvg').textContent = S.n ? Math.round(S.sum / S.n) : '--';
+  $('sTime').textContent = S.start ? fmtTime((performance.now() - S.start) / 1000) : '0:00';
+  const total = S.zoneMs.reduce((a,b) => a + b, 0) || 1;
+  const rows = $('zones');
+  if(!rows.children.length){
+    rows.innerHTML = ZONES.map((z,i) =>
+      `<div class="zrow"><span style="color:${z.c}">${i ? 'Z' + i : 'Rest'}</span><div class="bar"><i id="zb${i}" style="background:${z.c}"></i></div><span class="t" id="zt${i}">0:00</span></div>`).join('');
+  }
+  S.zoneMs.forEach((ms,i) => {
+    $('zb'+i).style.width = (ms / total * 100).toFixed(1) + '%';
+    $('zt'+i).textContent = fmtTime(ms / 1000);
+  });
+}
+
+function exportCsv(){
+  if(!S.samples.length) return;
+  const rows = ['elapsed_s,timestamp,bpm,zone'];
+  S.samples.forEach(p => rows.push([p.t.toFixed(1), new Date(p.wall).toISOString(), p.bpm, ZONES[zoneOf(p.bpm)].n].join(',')));
+  const blob = new Blob([rows.join('\n')], { type:'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'pulse-session-' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'-') + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/* ---------- init ---------- */
+function bindSettings(){
+  const num = (id, key, lo, hi, after) => {
+    const el = $(id); el.value = cfg[key];
+    el.addEventListener('change', () => {
+      let v = Math.round(Number(el.value));
+      if(!isFinite(v)) v = DEFAULTS[key];
+      v = Math.min(hi, Math.max(lo, v));
+      el.value = cfg[key] = v;
+      if(after) after(v);
+      saveCfg(); render();
+    });
+  };
+  num('age','age',10,99, v => { cfg.maxhr = 220 - v; $('maxhr').value = cfg.maxhr; });
+  num('maxhr','maxhr',120,230);
+  num('low','low',30,200);
+  num('high','high',60,230);
+  [['alarmOn'],['beepOn']].forEach(([k]) => {
+    const el = $(k); el.checked = !!cfg[k];
+    el.addEventListener('change', () => { cfg[k] = el.checked; saveCfg(); if(k === 'alarmOn') checkAlarm(S.bpm); render(); audio(); });
+  });
+}
+
+$('btnConnect').addEventListener('click', connectWatch);
+$('btnDemo').addEventListener('click', startDemo);
+$('btnStop').addEventListener('click', disconnect);
+$('btnCsv').addEventListener('click', exportCsv);
+$('btnReset').addEventListener('click', () => { resetSession(); });
+window.addEventListener('resize', () => { resize(); drawGraph(); });
+
+bindSettings();
+if(!navigator.bluetooth){
+  showNotice('Web Bluetooth isn’t available in this browser, so the watch can’t connect here. Use Chrome or Edge (desktop/Android), or try Demo mode.');
+}
+resize(); render();
+setInterval(() => { if(S.start && (S.mode === 'live' || S.mode === 'demo')) $('sTime').textContent = fmtTime((performance.now() - S.start)/1000); }, 500);
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
